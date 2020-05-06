@@ -26,8 +26,6 @@ Help('''
 Usage:
     scons unittests
     scons functests
-    scons pylint_all
-    scons pylint_error
 ''')
 
 def default(env,target,source): print SCons.Script.help_text

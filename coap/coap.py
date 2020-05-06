@@ -438,7 +438,8 @@ class coap(object):
             elif message['type']==d.TYPE_NON:
                 responseType = d.TYPE_NON
             else:
-                raise SystemError('unexpected type {0}'.format(message['type']))
+                responseType = d.TYPE_NON
+                #raise SystemError('unexpected type {0}'.format(message['type']))
 
             # if Stateless-Proxy option was present in the request echo it
             errorOptions = []

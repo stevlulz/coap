@@ -1,43 +1,41 @@
-import hashlib
 import logging
-from abc import ABCMeta
-
-import cbor
-import hkdf
-from Crypto.Cipher import AES
-
-import coapDefines as d
-import coapException as e
-import coapMessage as m
-import coapOption as o
-import coapUtils as u
-
-
 class NullHandler(logging.Handler):
     def emit(self, record):
         pass
-
-
 log = logging.getLogger('coapObjectSecurity')
 log.setLevel(logging.ERROR)
 log.addHandler(NullHandler())
 
+import cbor
+import hkdf
+import hashlib
+import coapDefines        as d
+import coapException      as e
+import coapOption         as o
+import coapMessage        as m
+import coapUtils          as u
 
-def protectMessage(context, version, code, options=[], payload=[], partialIV=None):
-    """
-    A function which protects the outgoing CoAP message using OSCOAP accoring to draft-ietf-core-object-security-03.
-    :param context security context to use to protect the outgoing message.
-    :param version CoAP version field of the outgoing message.
-    :param code CoAP code field of the outgoing message.
-    :param options A list of options to be included in the outgoing CoAP message.
-    :param payload Payload of the outgoing CoAP message.
-    :param partialIV Partial IV either to be used to protect the request or the one received as part of the
+import binascii
+from Crypto.Cipher import AES
+
+def protectMessage(context, version, code, options = [], payload = [], partialIV = None):
+    '''
+    \brief A function which protects the outgoing CoAP message using OSCOAP.
+
+    This function protects the outgoing CoAP message determined by input parameters according to
+    draft-ietf-core-object-security-03.
+    \param[in] Security context to use to protect the outgoing message.
+    \param[in] version CoAP version field of the outgoing message.
+    \param[in] code CoAP code field of the outgoing message.
+    \param[in] options A list of options to be included in the outgoing CoAP message.
+    \param[in] payload Payload of the outgoing CoAP message.
+    \param[in] partialIV Partial IV either to be used to protect the request or the one received as part of the
     corresponding request to protect the response. Expected string of length given by the context algorithm.
 
-    :return A tuple with the following elements:
+    \return A tuple with the following elements:
         - element 0 is the list of outer (integrity-protected and unprotected) CoAP options.
         - element 1 is the protected payload.
-    """
+    '''
 
     # split the options to class E (encrypted and integrity protected), I (integrity protected) and U (unprotected)
     (optionsClassE, optionsClassI, optionsClassU) = _splitOptions(options)
@@ -48,7 +46,7 @@ def protectMessage(context, version, code, options=[], payload=[], partialIV=Non
     plaintext = []
     plaintext += m.encodeOptions(optionsClassE)
     plaintext += m.encodePayload(payload)
-    plaintext = u.buf2str(plaintext)  # convert to string
+    plaintext = u.buf2str(plaintext) # convert to string
 
     # construct aad
 
@@ -58,7 +56,7 @@ def protectMessage(context, version, code, options=[], payload=[], partialIV=Non
     if _isRequest(code):
         requestKid = context.senderID
         nonce = u.xorStrings(context.senderIV, partialIV)
-    else:  # response
+    else:   # response
         requestKid = context.recipientID
         nonce = u.xorStrings(u.flipFirstBit(context.senderIV), partialIV)
 
@@ -75,7 +73,7 @@ def protectMessage(context, version, code, options=[], payload=[], partialIV=Non
         key=context.senderKey,
         nonce=nonce)
 
-    if not _isRequest(code):  # do not encode sequence number and kid in the response
+    if not _isRequest(code): # do not encode sequence number and kid in the response
         requestSeq = []
         requestKid = []
 
@@ -83,30 +81,30 @@ def protectMessage(context, version, code, options=[], payload=[], partialIV=Non
     finalPayload = _encodeCompressedCOSE(requestSeq, requestKid, ciphertext)
 
     if payload:
-        return (optionsClassI + optionsClassU, finalPayload)
+        return (optionsClassI+optionsClassU, finalPayload)
     else:
         objectSecurityOption.setValue(finalPayload)
-        return (optionsClassI + optionsClassU, [])
+        return (optionsClassI+optionsClassU, [])
 
+def unprotectMessage(context, version, code, options = [], ciphertext = [], partialIV=None):
+    '''
+    \brief A function which verifies and decrypts the incoming CoAP message using OSCOAP.
 
-def unprotectMessage(context, version, code, options=[], ciphertext=[], partialIV=None):
-    """
-    A function which verifies and decrypts the incoming CoAP message using OSCOAP according to
+    This function verifies the incoming CoAP message determined by input parameters according to
     draft-ietf-core-object-security-03.
-
-    :param context security context to use to verify+decrypt the outgoing message.
-    :param version CoAP version field of the incoming message.
-    :param code CoAP code field of the incoming message.
-    :param options A list of 'outer' options that are not encrypted.
-    :param ciphertext Ciphertext of the incoming CoAP message.
-    :param partialIV In case of request, partialIV corresponds to the one parsed from the message. In case
+    \param[in] Security context to use to verify+decrypt the outgoing message.
+    \param[in] version CoAP version field of the incoming message.
+    \param[in] code CoAP code field of the incoming message.
+    \param[in] options A list of 'outer' options that are not encrypted.
+    \param[in] ciphertext Ciphertext of the incoming CoAP message.
+    \param[in] partialIV In case of request, partialIV corresponds to the one parsed from the message. In case
      of response, it corresponds to the appropriate partialIV used in request. Expected string of length given
      by the context algorithm.
 
-    :return A tuple with the following elements:
+    \return A tuple with the following elements:
         - element 0 is the list of inner (encrypted) CoAP options.
         - element 1 is the decrypted payload.
-    """
+    '''
     assert objectSecurityOptionLookUp(options)
 
     (optionsClassE, optionsClassI, optionsClassU) = _splitOptions(options)
@@ -131,9 +129,9 @@ def unprotectMessage(context, version, code, options=[], ciphertext=[], partialI
                         requestSeq)
 
     # construct nonce
-    if _isRequest(code):  # verifying request
+    if _isRequest(code): # verifying request
         nonce = u.xorStrings(context.recipientIV, partialIV)
-    else:  # verifying response
+    else: # verifying response
         nonce = u.xorStrings(u.flipFirstBit(context.recipientIV), partialIV)
 
     try:
@@ -150,7 +148,6 @@ def unprotectMessage(context, version, code, options=[], ciphertext=[], partialI
 
     # returns a tuple (innerOptions, payload)
     return m.decodeOptionsAndPayload(u.str2buf(plaintext))
-
 
 def parseObjectSecurity(optionValue, payload):
     if optionValue and payload:
@@ -190,7 +187,6 @@ def parseObjectSecurity(optionValue, payload):
 
     return returnVal
 
-
 def getRequestSecurityParams(objectSecurityOption):
     if objectSecurityOption:
         context = objectSecurityOption.context
@@ -201,13 +197,11 @@ def getRequestSecurityParams(objectSecurityOption):
     else:
         return (None, None)
 
-
 def objectSecurityOptionLookUp(options):
     for option in options:
         if isinstance(option, o.ObjectSecurity):
             return option
     return None
-
 
 '''
    7 6 5 4 3 2 1 0
@@ -224,8 +218,6 @@ def objectSecurityOptionLookUp(options):
 +-------+---------+------------+
 
 '''
-
-
 def _encodeCompressedCOSE(partialIV, kid, ciphertext):
     buffer = []
 
@@ -234,7 +226,7 @@ def _encodeCompressedCOSE(partialIV, kid, ciphertext):
     else:
         kidFlag = 0
 
-    buffer += [kidFlag << 3 | len(partialIV)]  # flag byte
+    buffer += [ kidFlag << 3 | len(partialIV) ] # flag byte
 
     if partialIV:
         buffer += u.str2buf(partialIV)
@@ -246,8 +238,8 @@ def _encodeCompressedCOSE(partialIV, kid, ciphertext):
 
     return buffer
 
-
 def _constructAAD(version, code, optionsSerialized, aeadAlgorithm, requestKid, requestSeq):
+
     externalAad = cbor.dumps([
         version,
         code,
@@ -266,7 +258,6 @@ def _constructAAD(version, code, optionsSerialized, aeadAlgorithm, requestKid, r
 
     return cbor.dumps(encStructure)
 
-
 def _splitOptions(options):
     classE = []
     classI = []
@@ -281,7 +272,6 @@ def _splitOptions(options):
             classU += [option]
     return (classE, classI, classU)
 
-
 def _isRequest(code):
     if code in d.METHOD_ALL:  # request
         return True
@@ -290,29 +280,22 @@ def _isRequest(code):
     else:
         raise NotImplementedError()
 
+class CCMAlgorithm():
 
-class CCMAlgorithm(object):
-    __metaclass__ = ABCMeta
+    #======================== abstract members ================================
 
-    # ======================== abstract members ================================
-
-    @property
     def value(self):
         raise NotImplementedError
 
-    @property
     def keyLength(self):
         raise NotImplementedError
 
-    @property
     def ivLength(self):
         raise NotImplementedError
 
-    @property
     def tagLength(self):
         raise NotImplementedError
 
-    @property
     def maxSequenceNumber(self):
         raise NotImplementedError
 
@@ -346,28 +329,23 @@ class CCMAlgorithm(object):
         except ValueError:
             raise e.oscoapError('Invalid tag verification.')
 
-
 class AES_CCM_64_64_128(CCMAlgorithm):
-    value = d.COSE_AES_CCM_64_64_128
-    keyLength = 16  # 128 bits
-    ivLength = 7
-    tagLength = 8
-    maxSequenceNumber = 2 ** (min(ivLength * 8, 56) - 1) - 1
-
+    value               = d.COSE_AES_CCM_64_64_128
+    keyLength           = 16    # 128 bits
+    ivLength            = 7
+    tagLength           = 8
+    maxSequenceNumber   = 2 ** (min(ivLength*8, 56) - 1) - 1
 
 class AES_CCM_16_64_128(CCMAlgorithm):
-    value = d.COSE_AES_CCM_16_64_128
-    keyLength = 16
-    ivLength = 13
-    tagLength = 8
+    value       = d.COSE_AES_CCM_16_64_128
+    keyLength   = 16
+    ivLength    = 13
+    tagLength   = 8
     maxSequenceNumber = 2 ** (min(ivLength * 8, 56) - 1) - 1
-
 
 class SecurityContext:
     REPLAY_WINDOW_SIZE = 64
-
-    def __init__(self, masterSecret, senderID, recipientID, aeadAlgorithm=AES_CCM_64_64_128(), masterSalt='',
-                 hashFunction=hashlib.sha256):
+    def __init__(self, masterSecret, senderID, recipientID, aeadAlgorithm = AES_CCM_64_64_128(), masterSalt = '', hashFunction = hashlib.sha256):
 
         # Common context
         self.aeadAlgorithm = aeadAlgorithm
@@ -399,21 +377,21 @@ class SecurityContext:
         # Recipient context
         self.recipientID = recipientID
         self.recipientKey = self._hkdfDeriveParameter(self.hashFunction,
-                                                      self.masterSecret,
-                                                      self.masterSalt,
-                                                      self.recipientID,
-                                                      self.aeadAlgorithm.value,
-                                                      'Key',
-                                                      self.aeadAlgorithm.keyLength
-                                                      )
+                                                   self.masterSecret,
+                                                   self.masterSalt,
+                                                   self.recipientID,
+                                                   self.aeadAlgorithm.value,
+                                                   'Key',
+                                                   self.aeadAlgorithm.keyLength
+                                                    )
         self.recipientIV = self._hkdfDeriveParameter(self.hashFunction,
-                                                     self.masterSecret,
-                                                     self.masterSalt,
-                                                     self.recipientID,
-                                                     self.aeadAlgorithm.value,
-                                                     'IV',
-                                                     self.aeadAlgorithm.ivLength
-                                                     )
+                                                   self.masterSecret,
+                                                   self.masterSalt,
+                                                   self.recipientID,
+                                                   self.aeadAlgorithm.value,
+                                                   'IV',
+                                                   self.aeadAlgorithm.ivLength
+                                                   )
         self.replayWindow = [0]
 
     # ======================== public ==========================================
@@ -452,7 +430,7 @@ class SecurityContext:
         info = cbor.dumps([
             id,
             algorithm,
-            unicode(type),  # encode as text string
+            unicode(type), # encode as text string
             length
         ])
 
@@ -460,3 +438,4 @@ class SecurityContext:
         expand = hkdf.hkdf_expand(pseudo_random_key=extract, info=info, length=length, hash=hashFunction)
 
         return expand
+
